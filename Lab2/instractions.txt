@@ -1,0 +1,249 @@
+ALTER USER lab2 quota unlimited on USERS;
+
+CREATE TABLE lab2.STUDENTS(
+ ID NUMBER,
+ NAME VARCHAR2(50),
+ GROUP_ID NUMBER
+);
+
+CREATE TABLE lab2.GROUPS(
+ ID NUMBER,
+ NAME VARCHAR2(50),
+ C_VAL NUMBER
+);
+
+create or replace trigger unique_id_students
+ before update or insert on lab2.STUDENTS
+ FOR EACH ROW
+ DECLARE 
+ find NUMBER;
+ exist EXCEPTION;
+ BEGIN
+ SELECT COUNT(ID) INTO find FROM STUDENTS WHERE ID= :NEW.ID;
+ IF find = 1 THEN
+ dbms_output.put_line('Already exist');
+ raise exist;
+ END IF;
+ EXCEPTION
+ WHEN NO_DATA_FOUND THEN
+dbms_output.put_line('SUCCESSFUL');
+END unique_id_students;
+
+create or replace trigger unique_id_group
+  before update or insert on lab2.GROUPS
+  FOR EACH ROW
+	DECLARE 
+	find NUMBER;
+	exist EXCEPTION;
+	BEGIN
+	SELECT COUNT(ID) INTO find FROM GROUPS WHERE ID= :NEW.ID;
+	IF find = 1 THEN
+		dbms_output.put_line('Already exist');
+		raise exist;
+	END IF;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+		dbms_output.put_line('SUCCESSFUL');
+END unique_id_group;
+
+INSERT INTO lab2.students VALUES (2, 'Liza', 2);
+
+INSERT INTO lab2.groups VALUES (1, 'Liza', 2);
+
+CREATE OR REPLACE TRIGGER increment_id_student
+BEFORE INSERT ON lab2.STUDENTS 
+FOR EACH ROW 
+DECLARE 
+max_id NUMBER;
+wrong_table EXCEPTION;
+BEGIN 
+	SELECT max(id) INTO max_id FROM lab2.STUDENTS;
+	IF :NEW.id NOT NULL then
+		IF max_id< :NEW.id
+			dbms_output.put_line('Already exist');
+			raise wrong_table;
+		END IF;
+	else
+		:NEW.ID := MAX_ID + 1
+	END IF;
+	EXCEPTION 
+		WHEN NO_DATA_FOUND THEN
+			:NEW.ID := 1
+END increment_id_student;
+
+CREATE OR REPLACE TRIGGER LAB2.increment_id_group
+BEFORE INSERT ON lab2.GROUPS 
+FOR EACH ROW 
+DECLARE 
+max_id NUMBER;
+wrong_table EXCEPTION;
+BEGIN 
+	SELECT max(id) INTO max_id FROM lab2.GROUPS;
+	IF :NEW.id NOT NULL then
+		IF max_id< :NEW.id
+			dbms_output.put_line('Already exist');
+			raise wrong_table;
+		END IF;
+	else
+		:NEW.ID := MAX_ID + 1
+	END IF;
+	EXCEPTION 
+		WHEN NO_DATA_FOUND THEN
+			:NEW.ID := 1;
+END increment_id_group;
+
+INSERT INTO lab2.students (NAME, GROUP_ID) VALUES ('Liza', 2);
+INSERT INTO lab2.groups (NAME, C_VAL) VALUES ('Math', 2);
+
+CREATE OR REPLACE TRIGGER LAB2.unique_name
+BEFORE INSERT ON lab2.GROUPS 
+FOR EACH ROW 
+DECLARE 
+find NUMBER;
+exist EXCEPTION;
+BEGIN 
+	SELECT Count(id) INTO find FROM lab2.GROUPS WHERE name = :NEW.NAME;
+	dbms_output.put_line('Already exist');
+	raise exist;
+	EXCEPTION 
+		WHEN NO_DATA_FOUND THEN
+			dbms_output.put_line('Unique');
+END increment_id_group;
+
+INSERT INTO lab2.groups (NAME, C_VAL) VALUES ('Math', 2);
+
+CREATE OR REPLACE TRIGGER LAB2.fk_groups
+BEFORE INSERT OR UPDATE ON lab2.STUDENTS
+FOR EACH ROW 
+DECLARE 
+find NUMBER;
+not_exist EXCEPTION;
+BEGIN 
+	SELECT id INTO find FROM lab2.GROUPS WHERE id = :NEW.group_id;
+	EXCEPTION 
+		WHEN NO_DATA_FOUND THEN
+			dbms_output.put_line('ERROR FK');
+			raise not_exist;
+END increment_id_group;
+
+CREATE OR REPLACE TRIGGER LAB2.fk_delete
+BEFORE
+DELETE ON lab2.GROUPS
+FOR EACH ROW 
+DECLARE 
+find NUMBER;
+not_exist EXCEPTION;
+BEGIN 
+	DELETE FROM lab2.students WHERE group_id = :OLD.id;
+	dbms_output.put_line('SUCCESSFUL');
+	EXCEPTION 
+	WHEN not_exist THEN
+	dbms_output.put_line('Not exist');
+END fk_delete;
+
+CREATE TABLE lab2.student_logs(
+id NUMBER GENERATED ALWAYS as IDENTITY(START with 1 INCREMENT by 1),
+log_time DATE,
+log_do VARCHAR(20),
+st_id NUMBER,
+st_name VARCHAR(50),
+st_group_id NUMBER
+);
+
+CREATE OR REPLACE TRIGGER journal_students
+AFTER UPDATE OR INSERT OR DELETE
+ON LAB2.STUDENTS  FOR EACH ROW
+DECLARE
+ PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    CASE
+     WHEN deleting THEN 
+         INSERT INTO LAB2.student_logs VALUES (
+            'Delete', CURRENT_TIMESTAMP, :OLD.id, :OLD.name, :OLD.group_id);
+           
+        WHEN inserting THEN
+            INSERT INTO LAB2.student_logs  VALUES (
+            'Insert', CURRENT_TIMESTAMP, :NEW.id, :NEW.name, :NEW.group_id);
+        
+        WHEN updating THEN
+             INSERT INTO LAB2.student_logs  VALUES (
+            'Before update', CURRENT_TIMESTAMP, :OLD.id, :OLD.name, :OLD.group_id);
+             INSERT INTO LAB2.student_logs VALUES (
+            'After update', CURRENT_TIMESTAMP, :NEW.id, :NEW.name, :NEW.group_id);   
+    END CASE;
+END;
+
+CREATE OR REPLACE PROCEDURE student_rollback(time_rollback TIMESTAMP) 
+IS
+CURSOR jrnl_row IS (SELECT * FROM lab2.student_logs);
+wrong EXCEPTION;
+s_name VARCHAR(50);
+s_gr_id NUMBER;
+BEGIN  
+    FOR row_value IN jrnl_row LOOP
+        IF row_value.log_time > time_rollback THEN 
+            IF row_value.log_do = 'Insert' THEN
+                        dbms_output.put_line('Rollback insert. I delete row');
+                DELETE FROM lab2.students WHERE id=row_value.st_id;
+               CONTINUE;
+             END IF;
+            IF row_value.log_do = 'Delete' THEN
+                        dbms_output.put_line('Rollback delete. I insert row');
+                INSERT INTO lab2.students
+               VALUES(row_value.st_id, row_value.st_name, row_value.st_group_id);
+              CONTINUE;
+             END IF;
+            IF row_value.log_do = 'Before update' THEN
+                        dbms_output.put_line('Rollback update. I update row');
+                UPDATE lab2.students SET 
+                	name=row_value.st_name,
+                	group_id=row_value.st_group_id 
+                WHERE students.id=row_value.st_id;
+            CONTINUE;
+           END IF;
+            IF row_value.log_do = 'After update' THEN
+                CONTINUE;
+            END IF;
+             RAISE wrong;
+        ELSE
+        	raise wrong;
+        END IF;
+    END LOOP;
+   EXCEPTION
+       WHEN wrong THEN
+       dbms_output.put_line('WRONG!');
+END;
+
+CREATE OR REPLACE TRIGGER LAB2.count_student
+AFTER UPDATE OR INSERT OR DELETE
+ON LAB2.STUDENTS  FOR EACH ROW
+DECLARE
+gr_id NUMBER;
+val NUMBER;
+val_2 NUMBER;
+BEGIN
+    CASE
+     WHEN deleting THEN 
+     	SELECT c_val INTO val FROM lab2.GROUPS WHERE ID = :OLD.GROUP_ID;
+         UPDATE LAB2.GROUPS 
+         SET c_val = val-1
+         WHERE id = :OLD.group_id;
+     WHEN inserting THEN
+        SELECT c_val INTO val FROM lab2.GROUPS WHERE ID = :NEW.GROUP_ID;
+         UPDATE LAB2.GROUPS 
+         SET c_val = val+1
+         WHERE id = :new.GROUP_ID; 
+     WHEN updating THEN
+     	SELECT c_val INTO val FROM lab2.GROUPS WHERE ID = :NEW.GROUP_ID;
+     	SELECT c_val INTO val_2 FROM lab2.GROUPS WHERE ID = :OLD.GROUP_ID;
+         UPDATE LAB2.GROUPS 
+         SET c_val = val+1
+         WHERE id = :NEW.GROUP_ID;
+        UPDATE LAB2.GROUPS 
+         SET c_val = val_2-1
+         WHERE id = :OLD.GROUP_ID;
+    END CASE;
+   EXCEPTION 
+   WHEN NO_DATA_FOUND THEN
+   dbms_output.put_line('Nothing change');
+END;
