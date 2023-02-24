@@ -1,5 +1,9 @@
 ALTER USER lab2 quota unlimited on USERS;
 
+DROP TABLE lab2.students;
+DROP TABLE lab2.groups;
+DROP TABLE lab2.student_logs;
+
 CREATE TABLE lab2.STUDENTS(
  ID NUMBER,
  NAME VARCHAR2(50),
@@ -13,38 +17,46 @@ CREATE TABLE lab2.GROUPS(
 );
 
 CREATE OR REPLACE trigger LAB2.unique_id_students
- after update or insert on lab2.STUDENTS
+ before update or insert on lab2.STUDENTS
  FOR EACH ROW
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
+	exist EXCEPTION;
 	find NUMBER;
 	BEGIN
-	SELECT COUNT(ID) INTO find FROM LAB2.students WHERE ID = :NEW.ID;
-	IF find = 2 then
-		dbms_output.put_line('Already exist');
-		DELETE FROM students WHERE id = :NEW.id AND name = :NEW.name;
-	END IF;
+	SELECT ID INTO find FROM LAB2.students WHERE ID = :NEW.ID;
+	dbms_output.put_line('Already exist');
+	raise exist;
 END unique_id_students;
 
-CREATE OR REPLACE trigger lab2.unique_id_group
+CREATE OR REPLACE trigger LAB2.unique_id_group
  AFTER UPDATE or insert on LAB2.GROUPS
   FOR EACH ROW
 	DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 	find NUMBER;
+	exist EXCEPTION;
 	BEGIN
 	SELECT COUNT(ID) INTO find FROM LAB2.GROUPS WHERE ID = :NEW.ID;
-	IF find = 2 then
-		dbms_output.put_line('Already exist');
-		DELETE FROM groups WHERE id = :NEW.id AND name = :NEW.name;
-	END IF;
+	dbms_output.put_line('Already exist');
+	raise exist;
 END unique_id_group;
 
-INSERT INTO lab2.students VALUES (2, 'Liza', 2);
+INSERT INTO lab2.students VALUES (1, 'Liza', 2);
 
-INSERT INTO lab2.groups VALUES (1, 'Liza', 2);
+INSERT INTO lab2.students VALUES (1, 'Liza', 2);
 
-CREATE OR REPLACE TRIGGER LAB2.increment_id_student
+INSERT INTO lab2.students VALUES (2, 'Liza', 1);
+
+INSERT INTO lab2.groups VALUES (1, 'Sub', 0);
+
+INSERT INTO lab2.groups VALUES (2, 'Math', 0);
+
+INSERT INTO lab2.groups VALUES (1, 'Liza', 0);
+
+INSERT INTO lab2.groups VALUES (1, 'Liza', 0);
+
+CREATE OR REPLACE TRIGGER increment_id_student
 BEFORE INSERT ON lab2.STUDENTS 
 FOR EACH ROW 
 DECLARE 
@@ -57,6 +69,8 @@ BEGIN
 			IF max_id< :NEW.id OR max_id = :NEW.id then
 				dbms_output.put_line('Already exist');
 				raise wrong_table;
+			ELSE 
+			dbms_output.put_line('Successful');
 			END IF;
 		else
 			:NEW.ID := MAX_ID + 1;
@@ -66,10 +80,9 @@ BEGIN
 	END IF;
 END increment_id_student;
 
-CREATE OR REPLACE TRIGGER LAB2.increment_id_group
+CREATE OR REPLACE TRIGGER increment_id_group
 BEFORE INSERT ON lab2.GROUPS 
 FOR EACH ROW 
-
 DECLARE 
 max_id NUMBER;
 wrong_table EXCEPTION;
@@ -80,6 +93,8 @@ BEGIN
 			IF max_id< :NEW.id OR max_id = :NEW.id then
 				dbms_output.put_line('Already exist');
 				raise wrong_table;
+			ELSE 
+			dbms_output.put_line('Successful');
 			END IF;
 		else
 			:NEW.ID := MAX_ID + 1;
@@ -89,11 +104,11 @@ BEGIN
 	END IF;
 END increment_id_group;
 
-INSERT INTO lab2.students (NAME, GROUP_ID) VALUES ('Liza', 1);
-INSERT INTO lab2.groups (NAME, C_VAL) VALUES ('Prog', 2);
+INSERT INTO lab2.students (NAME, GROUP_ID) VALUES ('Sasha', 1);
+INSERT INTO lab2.groups (NAME, C_VAL) VALUES ('Lang', 2);
 
 UPDATE lab2.STUDENTS 
-SET group_id = 2
+SET id = 2
 WHERE name ='Liza';
 
 DELETE lab2.students WHERE id =1;
@@ -124,13 +139,13 @@ EXCEPTION
         dbms_output.put_line('success');
 END unique_name;
 
-INSERT INTO lab2.groups (NAME, C_VAL) VALUES ('Prog', 2);
+INSERT INTO lab2.groups (NAME, C_VAL) VALUES ('Music', 2);
 
 UPDATE lab2.GROUPS 
 SET name = 'Math'
 WHERE id = 1;
 
-CREATE OR REPLACE TRIGGER LAB2.LAB2.fk_groups
+CREATE OR REPLACE TRIGGER fk_groups
 BEFORE INSERT OR UPDATE ON lab2.STUDENTS
 FOR EACH ROW 
 DECLARE 
@@ -144,10 +159,12 @@ BEGIN
 			raise not_exist;
 END increment_id_group;
 
+INSERT INTO lab2.students (NAME, GROUP_ID) VALUES ('Sasha', 10);
+
 UPDATE groups 
 SET name = ''
 
-CREATE OR REPLACE TRIGGER LAB2.fk_delete
+CREATE OR REPLACE TRIGGER fk_delete
 BEFORE
 DELETE ON lab2.GROUPS
 FOR EACH ROW 
@@ -162,6 +179,8 @@ BEGIN
 	dbms_output.put_line('Not exist');
 END fk_delete;
 
+DELETE FROM lab2.GROUPS WHERE id=2;
+
 CREATE TABLE lab2.student_logs(
 id NUMBER GENERATED ALWAYS as IDENTITY(START with 1 INCREMENT by 1),
 log_time DATE,
@@ -171,7 +190,7 @@ st_name VARCHAR(50),
 st_group_id NUMBER
 );
 
-CREATE OR REPLACE TRIGGER LAB2.journal_students
+CREATE OR REPLACE TRIGGER journal_students
 AFTER UPDATE OR INSERT OR DELETE
 ON LAB2.STUDENTS  FOR EACH ROW
 DECLARE
@@ -242,7 +261,7 @@ END;
 
 CALL student_rollback(TO_TIMESTAMP('23.02.23 18:42:00'));
 
-CREATE OR REPLACE TRIGGER LAB2.LAB2.count_student
+CREATE OR REPLACE TRIGGER count_student
 AFTER UPDATE OR INSERT OR DELETE
 ON LAB2.STUDENTS  FOR EACH ROW
 DECLARE
