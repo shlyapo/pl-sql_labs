@@ -1,0 +1,84 @@
+CREATE OR REPLACE FUNCTION MIGRATION_SCHEMA(dev_schema varchar, prod_schema varchar) RETURN NUMBER
+IS
+DECLARE 
+CURSOR _row IS (SELECT * FROM lab2.student_logs);
+BEGIN
+
+CREATE VIEW new_schema AS (SELECT DISTINCT OBJECT_NAME 
+  FROM DBA_OBJECTS 
+ WHERE OBJECT_TYPE = 'TABLE'
+   AND OWNER = dev_schema 
+   AND OBJECT_NAME NOT IN 
+   (SELECT DISTINCT OBJECT_NAME 
+  FROM DBA_OBJECTS 
+ WHERE OBJECT_TYPE = 'TABLE'
+   AND OWNER = prod_schema));
+  COMMIT;
+ 
+ CREATE VIEW new_schema AS (SELECT DISTINCT OBJECT_NAME 
+  FROM DBA_OBJECTS 
+ WHERE OBJECT_TYPE = 'TABLE'
+   AND OWNER = prod_schema
+   AND OBJECT_NAME NOT IN 
+   (SELECT DISTINCT OBJECT_NAME 
+  FROM DBA_OBJECTS 
+ WHERE OBJECT_TYPE = 'TABLE'
+   AND OWNER = dev_schema));
+  COMMIT;
+ 
+ CREATE VIEW old_schema AS (SELECT DISTINCT OBJECT_NAME
+  FROM DBA_OBJECTS 
+ WHERE OBJECT_TYPE = 'TABLE'
+   AND OWNER = dev_schema 
+   AND OBJECT_NAME IN 
+   (SELECT DISTINCT OBJECT_NAME 
+  FROM DBA_OBJECTS 
+ WHERE OBJECT_TYPE = 'TABLE'
+   AND OWNER = prod_schema));
+	COMMIT;
+
+CREATE CURSOR old_tables AS old_schema;
+COMMIT;
+FOR tables IN old_tables LOOP
+ 	for i in (select column_name 
+              from all_tab_columns
+             where table_name = deb_schema.tables
+             minus
+            select column_name 
+              from all_tab_columns
+             where table_name = dev_schema.tables) loop
+    	dbms_output.put_line(i.column_name);         
+  	end loop;
+END LOOP;
+
+FOR tables IN old_tables LOOP
+ 	for i in (select column_name 
+              from all_tab_columns
+             where table_name = prod_schema.tables
+             minus
+            select column_name 
+              from all_tab_columns
+             where table_name = dev_schema.tables) loop
+    	dbms_output.put_line(i.column_name);         
+  	end loop;
+END LOOP;
+   
+ select column_name
+from USER_TAB_COLUMNS
+where table_name = 'MYTABLE'
+and nullable = 'N';
+
+	RETURN 1;
+END MIGRATION_SCHEMA;
+
+SELECT a.table_name, a.column_name, a.constraint_name, c.owner, 
+       -- referenced pk
+       c.r_owner, c_pk.table_name r_table_name, c_pk.constraint_name r_pk
+  FROM all_cons_columns a
+  JOIN all_constraints c ON a.owner = c.owner
+                        AND a.constraint_name = c.constraint_name
+  JOIN all_constraints c_pk ON c.r_owner = c_pk.owner
+                           AND c.r_constraint_name = c_pk.constraint_name
+ WHERE c.constraint_type = 'R'
+   AND a.table_name = :TableName
+
