@@ -4,7 +4,10 @@ BEGIN
 EXECUTE IMMEDIATE 'TRUNCATE TABLE fk_tmp';
 FOR table_item IN 
     (SELECT table_name AS name FROM all_tables 
-     WHERE OWNER = dev_schema_name) 
+     WHERE OWNER = dev_schema_name
+     MINUS 
+     SELECT table_name AS name FROM ALL_TABLES
+     WHERE OWNER = prod_schema_name) 
      LOOP
 
     INSERT INTO fk_tmp (child_obj, parent_obj)
@@ -14,11 +17,16 @@ FOR table_item IN
             a.OWNER = c.OWNER AND a.constraint_name = c.constraint_name
         JOIN all_constraints c_pk ON 
             c.r_owner = c_pk.owner AND c.r_constraint_name = c_pk.constraint_name
-        WHERE c.constraint_type = 'R' AND a.table_name = table_item.name 
-       AND table_item.name NOT IN (SELECT table_name FROM all_tables WHERE OWNER = prod_schema_name);
+            AND c_pk.table_name NOT IN (SELECT table_name FROM all_tables WHERE owner = prod_schema_name)
+        WHERE c.constraint_type = 'R' AND a.table_name = table_item.name;
 	
     IF SQL%ROWCOUNT = 0 THEN
-    	DBMS_OUTPUT.PUT_LINE('CREATE TABLE ' || prod_schema_name || '.' || table_item.name || ' AS (SELECT * FROM ' || table_item.name || ' WHERE 1=0);');
+    	DBMS_OUTPUT.PUT_LINE('CREATE TABLE '|| prod_schema_name || '.' || table_item.name || '(');
+    	FOR str IN( 
+    	SELECT data_type, column_name FROM all_tab_columns WHERE TABLE_NAME = table_item.name AND owner = 'DEV') LOOP
+    	DBMS_OUTPUT.PUT_LINE(str.COLUMN_NAME || ' ' || str.DATA_TYPE);
+    	END LOOP;
+    	DBMS_OUTPUT.PUT_LINE(');');
     END IF;
 
     END LOOP;
@@ -30,8 +38,14 @@ FOR ref_fk IN
     ) 
     LOOP
         IF ref_fk.CONNECT_BY_ISCYCLE = 0 THEN
-        	DBMS_OUTPUT.PUT_LINE('CREATE TABLE ' || prod_schema_name || '.' || ref_fk.child_obj || ' AS (SELECT * FROM ' || ref_fk.child_obj || ' WHERE 1=0);');
+        	DBMS_OUTPUT.PUT_LINE('CREATE TABLE '|| prod_schema_name || '.' || ref_fk.child_obj || '(');
+    	FOR str IN( 
+    	SELECT data_type, column_name FROM all_tab_columns WHERE TABLE_NAME = ref_fk.child_obj AND owner = 'DEV') LOOP
+    	DBMS_OUTPUT.PUT_LINE(str.COLUMN_NAME || ' ' || str.DATA_TYPE);
+    	END LOOP;
+    	DBMS_OUTPUT.PUT_LINE(');');
             ---dbms_output.put_line(ref_fk.child_obj);
+        	
         ELSE
             dbms_output.put_line('CYCLE IN TABLE' || ref_fk.child_obj);
         END IF;
@@ -39,109 +53,113 @@ FOR ref_fk IN
     
 end TABLES_ORDER;
 
+
+
 CREATE OR REPLACE fUNCTION LAB3.COMPARE_SCHEMA(dev_schema_name VARCHAR2, prod_schema_name VARCHAR2)
 RETURN NUMBER
 IS
-    diff_counter1 NUMBER;
-    diff_counter2 NUMBER;
+    diff_count1 NUMBER;
+    diff_count2 NUMBER;
     code VARCHAR2(100);
 BEGIN
 
 -- create tables or add columns from dev in prod
-FOR tab_diff IN 
+FOR tab IN 
     (SELECT  DISTINCT table_name FROM all_tab_columns 
      WHERE OWNER = dev_schema_name 
-     AND
-    (table_name, column_name) NOT IN (SELECT table_name, column_name FROM all_tab_columns 
-                                      WHERE OWNER = prod_schema_name))
+     AND column_name NOT IN (
+     SELECT column_name FROM all_tab_columns 
+     WHERE OWNER = prod_schema_name))
     LOOP
-        diff_counter1 := 0;
-        SELECT COUNT(*) INTO diff_counter1 FROM all_tables 
-        WHERE OWNER = prod_schema_name AND table_name = tab_diff.table_name;
+        diff_count1 := 0;
+        SELECT COUNT(*) INTO diff_count1 FROM all_tables 
+        WHERE OWNER = prod_schema_name AND table_name = tab.table_name;
         
-        IF diff_counter1 > 0 THEN
+        IF diff_count1 > 0 THEN
             FOR col_diff IN 
                 (SELECT  DISTINCT column_name, data_type FROM all_tab_columns 
-                 WHERE OWNER = dev_schema_name AND table_name = tab_diff.table_name  AND 
+                 WHERE OWNER = dev_schema_name AND table_name = tab.table_name  AND 
                 (table_name, column_name) NOT IN (SELECT table_name, column_name FROM all_tab_columns WHERE OWNER = prod_schema_name))
                 LOOP
-                    DBMS_OUTPUT.PUT_LINE('ALTER TABLE ' || prod_schema_name || '.' || tab_diff.table_name || ' ADD ' || col_diff.column_name || ' ' || col_diff.data_type || ';');
+                    DBMS_OUTPUT.PUT_LINE('ALTER TABLE ' || prod_schema_name || '.' || tab.table_name || ' ADD ' || col_diff.column_name || ' ' || col_diff.data_type || ';');
                 END LOOP;
         ELSE
             CONTINUE;
         END IF;
     END LOOP;
+   
 TABLES_ORDER(prod_schema_name, dev_schema_name);
+
 -- delete tables or drop columns in prod
-FOR tab_diff IN 
+FOR tab IN 
     (SELECT  DISTINCT table_name FROM all_tab_columns 
      WHERE OWNER = prod_schema_name  
      AND 
     (table_name, column_name) NOT IN (SELECT table_name, column_name FROM all_tab_columns WHERE OWNER = dev_schema_name))
     LOOP
-        diff_counter1 := 0;
-        diff_counter2 := 0;
-        SELECT COUNT(column_name) INTO diff_counter1 FROM all_tab_columns WHERE OWNER = prod_schema_name AND table_name = tab_diff.table_name;
-        SELECT COUNT(column_name) INTO diff_counter2 FROM all_tab_columns WHERE OWNER = dev_schema_name AND table_name = tab_diff.table_name;
+        diff_count1 := 0;
+        diff_count2 := 0;
+        SELECT COUNT(column_name) INTO diff_count1 FROM all_tab_columns WHERE OWNER = prod_schema_name AND table_name = tab.table_name;
+        SELECT COUNT(column_name) INTO diff_count2 FROM all_tab_columns WHERE OWNER = dev_schema_name AND table_name = tab.table_name;
         
-        IF diff_counter1 != diff_counter2 THEN
+        IF diff_count1 != diff_count2 THEN
             FOR col_diff IN 
                 (SELECT column_name FROM all_tab_columns 
-                 WHERE OWNER = prod_schema_name AND table_name = tab_diff.table_name AND 
-                 column_name NOT IN (SELECT column_name FROM all_tab_columns WHERE OWNER = dev_schema_name AND table_name = tab_diff.table_name))
+                 WHERE OWNER = prod_schema_name AND table_name = tab.table_name AND 
+                 column_name NOT IN (SELECT column_name FROM all_tab_columns WHERE OWNER = dev_schema_name AND table_name = tab.table_name))
                  LOOP
-                    DBMS_OUTPUT.PUT_LINE('ALTER TABLE '|| prod_schema_name || '.' || tab_diff.table_name || ' DROP COLUMN ' || col_diff.column_name || ';');
+                    DBMS_OUTPUT.PUT_LINE('ALTER TABLE '|| prod_schema_name || '.' || tab.table_name || ' DROP COLUMN ' || col_diff.column_name || ';');
                  END LOOP;
         ELSE
-            DBMS_OUTPUT.PUT_LINE('DROP TABLE ' || prod_schema_name || '.' || tab_diff.table_name || ' CASCADE CONSTRAINTS;');
+            DBMS_OUTPUT.PUT_LINE('DROP TABLE ' || prod_schema_name || '.' || tab.table_name || ' CASCADE CONSTRAINTS;');
         END IF;
     END LOOP;
 
 -- create procedure from dev in prod
-FOR diff_proc IN 
+FOR diff IN 
     (SELECT DISTINCT object_name FROM all_objects 
      WHERE object_type='PROCEDURE' AND OWNER=dev_schema_name  
      AND 
      object_name NOT IN (SELECT object_name FROM all_objects WHERE OWNER = prod_schema_name AND object_type='PROCEDURE'))
      LOOP
-        diff_counter1 := 0;   
+        diff_count1 := 0;   
         DBMS_OUTPUT.PUT_LINE('CREATE OR REPLACE ');
-        FOR text_line IN (SELECT text FROM all_source WHERE type='PROCEDURE' AND NAME=diff_proc.object_name AND OWNER=dev_schema_name)
+        FOR text_line IN (SELECT text FROM all_source WHERE type='PROCEDURE' AND NAME=diff.object_name AND OWNER=dev_schema_name)
             LOOP
-                IF diff_counter1 != 0 THEN
+                IF diff_count1 != 0 THEN
                     DBMS_OUTPUT.PUT_LINE(rtrim(text_line.text, chr (10) || chr (13)));
                 ELSE
                     DBMS_OUTPUT.PUT_LINE(rtrim(prod_schema_name || '.' || text_line.text, chr (10) || chr (13)));
-                    diff_counter1 := 1;
+                    diff_count1 := 1;
                 END IF;
             END LOOP;
     END LOOP;   
 
 -- delete procedure in prod
-FOR diff_proc IN 
+FOR diff IN 
     (SELECT DISTINCT object_name FROM all_objects 
      WHERE object_type='PROCEDURE' 
      AND OWNER=prod_schema_name AND 
      object_name NOT IN (SELECT object_name FROM all_objects WHERE OWNER = dev_schema_name AND object_type='PROCEDURE'))
     LOOP
-        DBMS_OUTPUT.PUT_LINE('DROP PROCEDURE ' || prod_schema_name || '.' || diff_proc.object_name);
+        DBMS_OUTPUT.PUT_LINE('DROP PROCEDURE ' || prod_schema_name || '.' || diff.object_name);
     END LOOP;   
 
 -- create functions from dev in prod
-FOR diff_func IN 
+FOR diff IN 
     (SELECT DISTINCT object_name FROM all_objects 
      WHERE object_type='FUNCTION' AND OWNER=dev_schema_name  
      AND object_name NOT IN (SELECT object_name FROM all_objects WHERE OWNER = prod_schema_name AND object_type='FUNCTION'))
      LOOP
-        diff_counter1 := 0;   
+        diff_count1 := 0;   
         DBMS_OUTPUT.PUT_LINE('CREATE OR REPLACE ');
-        FOR text_line IN (SELECT text FROM all_source WHERE type ='FUNCTION' AND NAME =diff_func.object_name AND OWNER=dev_schema_name)
+        FOR text_line IN (SELECT text FROM all_source WHERE type ='FUNCTION' AND NAME =diff.object_name AND OWNER=dev_schema_name)
             LOOP
-                IF diff_counter1 != 0 THEN
+                IF diff_count1 != 0 THEN
                     DBMS_OUTPUT.PUT_LINE(rtrim(text_line.text, chr (10) || chr (13)));
                 ELSE
                    DBMS_OUTPUT.PUT_LINE(rtrim(prod_schema_name || '.' || text_line.text, chr (10) || chr (13)));
-                   diff_counter1 := 1;
+                   diff_count1 := 1;
                 END IF;
             END LOOP;
     END LOOP; 
