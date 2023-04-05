@@ -1,181 +1,125 @@
-ALTER USER eliz quota unlimited on USERS;
+CREATE OR REPLACE PACKAGE JSON_PARSER IS
+    FUNCTION Parse_Arg(l_element JSON_ELEMENT_T) RETURN CLOB;
+END JSON_PARSER;
 
-DROP TABLE MYTABLE;
+CREATE OR REPLACE PACKAGE BODY JSON_PARSER IS
 
- --1
-CREATE TABLE MyTable(
-	id NUMBER PRIMARY KEY,
-	val NUMBER NOT NULL 
-);
+    FUNCTION Parse_Array_Args(l_json_array JSON_ARRAY_T, separator CLOB) RETURN CLOB
+        IS
+        temp    CLOB;
+        res     CLOB    := '';
+        isFirst BOOLEAN := TRUE;
+        counter integer;
+    BEGIN
+        FOR counter IN 0 .. (l_json_array.get_size() - 1)
+            LOOP
+                temp := Parse_Arg(l_json_array.get(counter));
+                IF isFirst = TRUE THEN
+                    isFirst := FALSE;
+                ELSE
+                    temp := CONCAT(separator, temp);
+                END IF;
+                res := CONCAT(res, temp);
+            END LOOP;
+        return res;
+    END;
 
+    FUNCTION Parse_Array_Args(l_json_array JSON_KEY_LIST, separator CLOB) RETURN CLOB
+        IS
+        temp    CLOB;
+        res     CLOB    := '';
+        isFirst BOOLEAN := TRUE;
+        counter integer;
+    BEGIN
+        FOR counter IN 1 .. l_json_array.COUNT
+            LOOP
+                temp := l_json_array(counter);
+                IF isFirst = TRUE THEN
+                    isFirst := FALSE;
+                ELSE
+                    temp := CONCAT(separator, temp);
+                END IF;
+                res := CONCAT(res, temp);
+            END LOOP;
+        return res;
+    END;
 
---2
-BEGIN
-	FOR i IN 1 .. 10000 LOOP
-		INSERT INTO MYTABLE VALUES (i, round(dbms_random.value(1,10000)));
-	END LOOP;
-END;
+    FUNCTION Make_Operation(LHS CLOB, RHS CLOB, operation CLOB) RETURN CLOB
+        IS
+    BEGIN
+        return LHS || ' ' || operation || ' ' || RHS;
+    END;
 
+    FUNCTION Get_Operation(l_object JSON_OBJECT_T) RETURN CLOB
+        IS
+        UNKNOWN_OPERATION EXCEPTION;
+        PRAGMA exception_init (UNKNOWN_OPERATION , -20001 );
+        ex        VARCHAR2(10) := 'UNKNOWN';
+        res       CLOB;
+        operation CLOB;
+    BEGIN
+        operation := UPPER(l_object.get_string('OPERATOR'));
+        res := CASE
+                   WHEN
+                       operation in ('=', '!=', '<>', '<', '>', '>=', '<=')
+                       THEN Make_Operation(Parse_Arg(l_object.get('LHS')), Parse_Arg(l_object.get('RHS')), operation)
+                   WHEN operation in ('IN', 'NOT IN') THEN Make_Operation(Parse_Arg(l_object.get('LHS')), '(' ||
+                                                                                                          Parse_Array_Args(l_object.get_array('RHS'), ', ') ||
+                                                                                                          ')',
+                                                                          operation)
+                   WHEN operation in ('EXISTS', 'NOT EXISTS')
+                       THEN operation || ' (' || Parse_Arg(l_object.get('RHS')) || ')'
+                   ELSE ex
+            END;
+        IF res = ex THEN raise_application_error(-20001, 'Unknown operation: ' || operation); END IF;
+        return res;
+    END;
 
---3
-CREATE OR REPLACE FUNCTION even_or_odd
-RETURN VARCHAR2 IS 
-results VARCHAR2(20);
-count_even NUMBER := 0;
-count_odd NUMBER := 0;
-BEGIN
-	SELECT COUNT(ID) INTO count_even FROM MYTABLE WHERE MOD(VAL,2) = 0;
-	SELECT COUNT(ID) INTO count_odd FROM MYTABLE WHERE MOD(VAL,2) <> 0;
-	IF(count_even > count_odd) THEN
-		results := 'True';
-		RETURN results;
-	END IF;
-	IF(count_even < count_odd) THEN
-		results := 'False';
-		RETURN results;
-	END IF;
-	IF(count_even = count_odd) THEN
-		results := 'Equal';
-		RETURN results;
-	END IF;
-END even_or_odd;
+    FUNCTION GET_WHERE_TO_CLOB(l_json_array JSON_ARRAY_T) RETURN CLOB
+        IS
+        UNKNOWN_WHERE EXCEPTION;
+        PRAGMA exception_init (UNKNOWN_WHERE , -20002 );
+        ex       VARCHAR2(10) := 'UNKNOWN';
+        counter  integer;
+        res      CLOB         := '';
+        temp_str CLOB;
+        l_object JSON_OBJECT_T;
+    BEGIN
+        FOR counter IN 0 .. (l_json_array.get_size() - 1)
+            LOOP
+                l_object := JSON_OBJECT_T(l_json_array.get(counter));
+                temp_str := CASE
+                                WHEN l_object.has('SEPARATOR') = TRUE THEN l_object.get_string('SEPARATOR')
+                                WHEN l_object.has('OPERATOR') = TRUE THEN Get_Operation(l_object)
+                                ELSE ex
+                    END;
+                IF temp_str = ex THEN
+                    raise_application_error(-20002, 'Unknown where command: ' || l_object.to_string());
+                END IF;
+                res := CONCAT(res, CONCAT(' ', temp_str));
+            END LOOP;
+        return res;
+    END;
 
-
- --4
-create or replace FUNCTION random_ins (row_id IN NUMBER, row_val IN NUMBER )
-RETURN VARCHAR2 IS results varchar(80);
-    id_val NUMBER;
-    id_exist EXCEPTION;
-BEGIN
-	SELECT COUNT(*) INTO id_val FROM MYTABLE;
-      IF id_val<row_id then
-        results :=  'insert into MYTABLE (id, name) values('|| row_id ||','|| row_val ||')';
-      else 
-        raise id_exist;
-      end if;  
-     EXCEPTION
-    	WHEN id_exist THEN
-    	results := 'Already exist';
-   return results;
-END;
-
-declare
-  c varchar(80);
-  begin
-   c  :=  ELIZ.random_ins(100, 100);  
-   dbms_output.put_line(c);  
- end;
-
---5
-CREATE OR REPLACE PROCEDURE ELIZ.my_insert (row_id IN NUMBER, row_val IN number ) 
-IS
-results varchar2(20);
-find NUMBER;
-not_id EXCEPTION;
-BEGIN
-	select count(*) into  find from MYTABLE
-  where ID = row_id;
-  if find = 0 then
-      INSERT INTO MYTABLE (val)
-      VALUES (row_val);
-     results := 'Successful';
-  else   
-     raise not_id;
-  End IF;
- 	EXCEPTION
- 		WHEN not_id THEN
- 			results := 'exist';
- dbms_output.put_line(results);  
-END;
-
-CALL ELIZ.my_insert(700, 700);
-
-
-create or replace NONEDITIONABLE PROCEDURE my_update (row_id in number, row_val IN number ) 
-IS 
-results varchar(20);
-find number;
-not_id EXCEPTION;
-BEGIN
-  select count(*) into  find from MYTABLE
-  where ID = row_id;
-  if find = 1 then
-      update  MYTABLE
-      set val = row_val
-      where ID = row_id;
-     results := 'Successful';
-  else   
-      raise not_id;
-  End IF;
- 	EXCEPTION
- 		WHEN not_id THEN
- 			results := 'Dont exist';
- 	dbms_output.put_line(results);  
-end;   
-  
-CALL eliz.my_update(20, 200);
-
-
-create or replace PROCEDURE my_delete (row_id in number ) IS
-results varchar2(20);
-find number;
-not_id EXCEPTION;
-BEGIN
-      select count(*)
-  into   find
-  from   MYTABLE
-  where id = row_id;
-  if find = 1 then
-      delete  MYTABLE
-      where id = row_id;
-     results := 'Successful';
-  else   
-      raise not_id;
-  end if;    
- EXCEPTION
- 	WHEN not_id THEN
- 		results := 'Dont exist';
- dbms_output.put_line(results); 
-END;
-
-CALL eliz.my_delete(20000);
-
-
---6
-
-CREATE OR REPLACE FUNCTION total_year(in_monthly NUMBER, percent NUMBER) 
-RETURN VARCHAR2
-IS
-    results REAL;
-    not_percent EXCEPTION;
-BEGIN   
-    IF percent < 0 THEN
-        RAISE not_percent;        
-    END IF;        
-    results := (1 + (0.01)*percent)*12*in_monthly;
-    RETURN  utl_lms.format_message('%d', TO_CHAR(results));
-
-    EXCEPTION
-        WHEN INVALID_NUMBER THEN
-        
-            RETURN 'Wrong input type';
-        WHEN not_percent THEN
-            RETURN utl_lms.format_message('Wrong percent');
-END;
-
-
-DECLARE
-    res VARCHAR2(100);
-   	in_mon NUMBER;
-   	perc NUMBER;
-BEGIN
-	in_mon := 'dd';
-	perc := 13;
-     res :=  ELIZ.total_year(in_mon, -6); 
-    dbms_output.put_line(res);
-    EXCEPTION
-        WHEN VALUE_ERROR  THEN
-             dbms_output.put_line('Wrong input type');
-END;
-
-
+    FUNCTION Get_Select_From_JSON_Object(l_object JSON_OBJECT_T) RETURN CLOB
+        IS
+        table_name_t  CLOB;
+        select_name_t CLOB;
+        where_t       CLOB;
+        into_t        CLOB;
+        res_str       CLOB;
+    BEGIN
+        table_name_t := l_object.get_string('TABLE_NAME');
+        select_name_t := Parse_array_Args(l_object.get_array('VALUES'), ', ');
+        res_str := TO_CLOB('SELECT ' || select_name_t);
+        IF l_object.has('INTO') = TRUE THEN
+            into_t := Parse_Array_Args(l_object.get_array('INTO'), ', ');
+            res_str := CONCAT(res_str, ' INTO ' || into_t);
+        END IF;
+        res_str := CONCAT(res_str, ' FROM ' || table_name_t);
+        IF l_object.has('WHERE') = TRUE THEN
+            where_t := Get_WHERE_TO_CLOB(l_object.get_array('WHERE'));
+            res_str := CONCAT(res_str, ' WHERE' || where_t);
+        END IF;
+        return res_str;
+    END;
