@@ -314,3 +314,68 @@ FUNCTION Get_UPDATE_TO_CLOB(l_json_array JSON_ARRAY_T) RETURN CLOB
     BEGIN
         return parse_array_args(l_json_array, ' ');
     END;
+
+ FUNCTION Get_Create_Table_From_JSON_Object(l_object JSON_OBJECT_T) RETURN CLOB
+        IS
+        table_name_t CLOB;
+        colums_t     CLOB;
+        res_str      CLOB;
+    BEGIN
+        table_name_t := l_object.get_string('NAME');
+        colums_t := Get_COLUMS_TO_CLOB(l_object.get_array('COLUMS'));
+        res_str := TO_CLOB('CREATE TABLE ' || table_name_t || '(' || colums_t || ')');
+        return res_str;
+    END;
+
+    FUNCTION Get_Create_Sequence_From_JSON_Object(l_object JSON_OBJECT_T) RETURN CLOB
+        IS
+        sequence_name_t CLOB;
+        res_str         CLOB;
+    BEGIN
+        sequence_name_t := l_object.get_string('NAME');
+        res_str := TO_CLOB('CREATE SEQUENCE ' || sequence_name_t);
+        return res_str;
+    END;
+
+    FUNCTION Get_Create_Trigger_From_JSON_Object(l_object JSON_OBJECT_T) RETURN CLOB
+        IS
+        trigger_name_t  CLOB;
+        table_name_t    CLOB;
+        type_when_t     CLOB;
+        event_t         CLOB;
+        other_options_t CLOB;
+        do_t            CLOB;
+        res_str         CLOB;
+    BEGIN
+        trigger_name_t := l_object.get_string('NAME');
+        table_name_t := l_object.get_string('TABLE_NAME');
+        type_when_t := l_object.get_string('TYPE_WHEN');
+        event_t := l_object.get_string('EVENT');
+        res_str := TO_CLOB('CREATE TRIGGER ' || trigger_name_t || ' ' || type_when_t || ' ' || event_t || ' ON ' ||
+                           table_name_t);
+        IF l_object.has('OTHER_OPTIONS') = TRUE THEN
+            other_options_t := Get_OTHER_OPTIONS_TO_CLOB(l_object.get_array('OTHER_OPTIONS'));
+            res_str := CONCAT(res_str, ' ' || other_options_t);
+        END IF;
+        do_t := Parse_array_args(l_object.get_array('DO'), '; ') || '; ';
+        return res_str || chr(10) || ' BEGIN ' || chr(10) || do_t || chr(10) || ' END;' || chr(10);
+    END;
+
+    FUNCTION Get_Create_From_JSON_Object(l_object JSON_OBJECT_T) RETURN CLOB
+        IS
+        UNKNOWN_TYPE EXCEPTION;
+        PRAGMA exception_init (UNKNOWN_TYPE , -20006);
+        ex       VARCHAR2(10) := 'UNKNOWN';
+        res      CLOB;
+        type_obj CLOB;
+    BEGIN
+        type_obj := UPPER(l_object.get_string('TYPE'));
+        res := CASE type_obj
+                   WHEN 'TABLE' THEN Get_Create_Table_From_JSON_Object(l_object.get_object('VALUES'))
+                   WHEN 'SEQUENCE' THEN Get_Create_Sequence_From_JSON_Object(l_object.get_object('VALUES'))
+                   WHEN 'TRIGGER' THEN Get_Create_Trigger_From_JSON_Object(l_object.get_object('VALUES'))
+                   ELSE ex
+            END;
+        IF res = ex THEN raise_application_error(-20001, 'Unknown type: ' || type_obj); END IF;
+        return res;
+    END;
